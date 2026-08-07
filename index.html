@@ -125,7 +125,8 @@ nav.tabs .tab-indicator{
 .netcard .breakdown{display:flex;gap:22px;margin-top:14px;font-size:13px;color:#DDD9FF;}
 .netcard .breakdown b{color:#fff;font-family:'IBM Plex Mono',monospace;}
 
-.chart-wrap{display:flex;gap:18px;align-items:center;}
+.chart-wrap{display:flex;flex-direction:column;align-items:center;gap:16px;}
+.chart-wrap .legend{width:100%;}
 .legend{flex:1;min-width:0;}
 .legend-row{
   display:flex;align-items:center;gap:8px;padding:6px 4px;border-radius:4px;cursor:pointer;
@@ -137,9 +138,15 @@ nav.tabs .tab-indicator{
 .legend-pct{color:var(--ink-soft);font-size:12px;width:38px;text-align:right;}
 .legend-val{font-family:'IBM Plex Mono',monospace;font-size:12.5px;width:100px;text-align:right;}
 
-svg.pie{flex-shrink:0;}
-svg.pie path{stroke:var(--paper-card);stroke-width:1.5;cursor:pointer;transition:opacity .15s;}
-svg.pie path:hover{opacity:.78;}
+svg.pie{flex-shrink:0;max-width:100%;height:auto;}
+svg.pie path,svg.pie circle{stroke:var(--paper-card);stroke-width:1.5;cursor:pointer;transition:opacity .15s;}
+svg.pie path:hover,svg.pie circle:hover{opacity:.78;}
+.pie-label{
+  font-family:'Pretendard','Apple SD Gothic Neo',sans-serif;
+  font-size:12px;font-weight:700;fill:#fff;
+  paint-order:stroke fill;stroke:rgba(30,27,75,.45);stroke-width:3px;stroke-linejoin:round;
+  pointer-events:none;
+}
 .pie-empty{fill:none;stroke:var(--line);stroke-width:1.5;stroke-dasharray:4 4;}
 
 table.ledger-table{width:100%;border-collapse:collapse;font-size:13.5px;}
@@ -550,14 +557,17 @@ function arcPath(cx,cy,r,startDeg,endDeg){
   const largeArc = (endDeg-startDeg) <= 180 ? "0":"1";
   return `M ${cx} ${cy} L ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z`;
 }
+function pieLabelText(name){
+  return name.length>7 ? name.slice(0,6)+'…' : name;
+}
 function buildPie(items, type){
   // items: [{id,name,value,desc}]
   const total = items.reduce((a,b)=>a+Math.max(b.value,0),0);
-  const size=180, cx=size/2, cy=size/2, r=82;
+  const size=280, cx=size/2, cy=size/2, r=118;
   if(total<=0){
     return `<svg class="pie" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle class="pie-empty" cx="${cx}" cy="${cy}" r="${r}"/></svg>`;
   }
-  let angle=0, paths='';
+  let angle=0, paths='', labels='';
   items.forEach((it,idx)=>{
     const v = Math.max(it.value,0);
     if(v<=0) return;
@@ -566,12 +576,18 @@ function buildPie(items, type){
     const tooltip = `<title>${escapeHtml(it.name)}${it.desc?' - '+escapeHtml(it.desc):''}</title>`;
     if(sweep>=359.99){
       paths += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}" data-id="${it.id}" data-type="${type}" onclick="handleSliceClick('${type}','${it.id}')">${tooltip}</circle>`;
+      labels += `<text class="pie-label" x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle">${escapeHtml(pieLabelText(it.name))}</text>`;
     } else {
       paths += `<path d="${arcPath(cx,cy,r,angle,angle+sweep)}" fill="${col}" data-id="${it.id}" data-type="${type}" onclick="handleSliceClick('${type}','${it.id}')">${tooltip}</path>`;
+      if(sweep>=20){
+        const mid = angle+sweep/2;
+        const pos = polar(cx,cy,r*0.66,mid);
+        labels += `<text class="pie-label" x="${pos.x.toFixed(2)}" y="${pos.y.toFixed(2)}" text-anchor="middle" dominant-baseline="middle">${escapeHtml(pieLabelText(it.name))}</text>`;
+      }
     }
     angle += sweep;
   });
-  return `<svg class="pie" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>`;
+  return `<svg class="pie" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}${labels}</svg>`;
 }
 function buildLegend(items, type){
   const total = items.reduce((a,b)=>a+Math.max(b.value,0),0);
