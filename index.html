@@ -66,15 +66,17 @@ header.top .sub{
 
 nav.tabs{
   position:relative;
-  display:inline-flex;gap:2px;margin-bottom:22px;
+  display:flex;gap:2px;margin-bottom:22px;
   background:var(--paper-card);padding:5px;border-radius:14px;
   box-shadow:var(--shadow);
+  max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
 }
+nav.tabs::-webkit-scrollbar{display:none;}
 nav.tabs button{
-  position:relative;z-index:1;
+  position:relative;z-index:1;flex-shrink:0;
   appearance:none;border:none;background:transparent;
   padding:9px 16px;font-size:14px;color:var(--ink-soft);cursor:pointer;
-  border-radius:10px;font-weight:700;letter-spacing:.1px;
+  border-radius:10px;font-weight:700;letter-spacing:.1px;white-space:nowrap;
   font-family:inherit;transition:color .25s ease;
 }
 nav.tabs button.active{color:#fff;}
