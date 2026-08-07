@@ -164,6 +164,13 @@ table.ledger-table input[type=text], table.ledger-table input[type=number]{
   width:100%;font-family:inherit;background:#fff;
 }
 table.ledger-table td.num input{font-family:'IBM Plex Mono',monospace;text-align:right;}
+.cat-table{table-layout:fixed;}
+.cat-table th:nth-child(1),.cat-table td:nth-child(1){width:34%;}
+.cat-table th:nth-child(2),.cat-table td:nth-child(2){width:19%;}
+.cat-table th:nth-child(3),.cat-table td:nth-child(3){width:19%;}
+.cat-table th:nth-child(4),.cat-table td:nth-child(4){width:18%;}
+.cat-table th:nth-child(5),.cat-table td:nth-child(5){width:10%;}
+.cat-table select{width:100%;padding:5px 4px;font-size:12.5px;}
 input[type=number]::-webkit-outer-spin-button,
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
 input[type=number]{-moz-appearance:textfield;}
@@ -892,7 +899,7 @@ function personBlock(person, label, data, finalized){
       <span>${label}</span>
       ${!finalized?`<button class="btn secondary small" onclick="addCat('${person}')">+ 항목 추가</button>`:''}
     </div>
-    <table class="ledger-table">
+    <table class="ledger-table cat-table">
       <thead><tr><th>항목</th><th>통장</th><th class="num">기준(예산)</th><th class="num" title="지출내역 탭에 입력한 금액이 자동으로 합산됩니다">실제 지출</th><th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
