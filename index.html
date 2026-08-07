@@ -280,6 +280,16 @@ select, .plain-input{
   font-size:15px;text-align:center;letter-spacing:2px;font-family:inherit;background:#fff;
 }
 .lock-error{color:var(--rust);font-size:12.5px;margin-top:10px;min-height:16px;}
+
+.toast{
+  position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(12px);
+  background:var(--ink);color:#fff;padding:12px 20px;border-radius:12px;
+  font-size:13.5px;font-weight:700;box-shadow:0 14px 34px rgba(30,27,75,.35);
+  opacity:0;pointer-events:none;transition:opacity .22s ease, transform .22s ease;
+  z-index:200;max-width:90vw;text-align:center;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.toast.error{background:var(--rust);}
 </style>
 </head>
 <body>
@@ -336,6 +346,7 @@ select, .plain-input{
     <div class="modal-body" id="modal-body"></div>
   </div>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
 /* ============ 공용 유틸 ============ */
@@ -430,11 +441,12 @@ async function sset(key, value){
     const body = JSON.stringify(value);
     const fileId = driveFileIndex[key];
     if(fileId){
-      await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+      const res = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
         method:'PATCH',
         headers:{'Content-Type':'application/json'},
         body
       });
+      if(!res.ok) throw new Error('drive update failed: '+res.status);
     } else {
       const metadata = { name: key+'.json', parents:[driveFolderId], mimeType:'application/json' };
       const form = new FormData();
@@ -444,10 +456,14 @@ async function sset(key, value){
         method:'POST',
         body: form
       });
+      if(!res.ok) throw new Error('drive create failed: '+res.status);
       const created = await res.json();
       driveFileIndex[key] = created.id;
     }
-  }catch(e){ console.error('저장 실패', key, e); }
+  }catch(e){
+    console.error('저장 실패', key, e);
+    showToast('저장에 실패했습니다. 인터넷 연결을 확인해 주세요.', 'error');
+  }
 }
 
 /* ============ 전역 상태 ============ */
@@ -657,6 +673,16 @@ function handleSliceClick(type, id){
 }
 function openModal(){ document.getElementById('modal-overlay').classList.add('open'); }
 function closeModal(){ document.getElementById('modal-overlay').classList.remove('open'); }
+
+let toastTimer = null;
+function showToast(message, type){
+  const el = document.getElementById('toast');
+  if(!el) return;
+  el.textContent = message;
+  el.className = 'toast show' + (type==='error' ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ el.classList.remove('show'); }, 4000);
+}
 document.getElementById('modal-overlay').addEventListener('click', e=>{
   if(e.target.id==='modal-overlay') closeModal();
 });
