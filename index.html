@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>우리집 가계부</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.css');
@@ -282,7 +283,16 @@ select, .plain-input{
 </style>
 </head>
 <body>
-<div id="lock-screen" class="lock-screen">
+<div id="google-login-screen" class="lock-screen">
+  <div class="lock-card">
+    <div class="lock-mark"></div>
+    <h1>우리집 가계부</h1>
+    <p>데이터는 각자의 구글 드라이브에 안전하게 저장됩니다</p>
+    <button class="btn" id="google-signin-btn" style="width:100%;">Google 계정으로 로그인</button>
+    <div class="lock-error" id="google-signin-error"></div>
+  </div>
+</div>
+<div id="lock-screen" class="lock-screen" style="display:none">
   <div class="lock-card">
     <div class="lock-mark"></div>
     <h1>우리집 가계부</h1>
@@ -342,16 +352,102 @@ function todayISO(){ return new Date().toISOString().slice(0,10); }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function ym(y,m){ return String(m).padStart(2,'0'); }
 
-/* ============ 저장소 래퍼 (공유 데이터) ============ */
+/* ============ Google Drive 저장소 ============ */
+const GOOGLE_CLIENT_ID = '1041342890679-qite5q3ubr8f1qgdrgp5tc8m5tvldc76.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_FOLDER_NAME = '우리집 가계부 데이터';
+
+let accessToken = null;
+let tokenClient = null;
+let driveFolderId = null;
+let driveFileIndex = {}; // key -> fileId
+
+function initGoogleAuth(){
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: ()=>{}
+  });
+}
+function requestDriveAccess(silent){
+  return new Promise((resolve, reject)=>{
+    tokenClient.callback = (resp)=>{
+      if(resp.error){ reject(resp); return; }
+      accessToken = resp.access_token;
+      resolve(resp);
+    };
+    tokenClient.error_callback = (err)=>reject(err);
+    tokenClient.requestAccessToken(silent ? { prompt:'' } : {});
+  });
+}
+async function driveFetch(url, options){
+  options = options || {};
+  options.headers = Object.assign({}, options.headers, { Authorization: 'Bearer '+accessToken });
+  let res = await fetch(url, options);
+  if(res.status===401){
+    await requestDriveAccess(true);
+    options.headers.Authorization = 'Bearer '+accessToken;
+    res = await fetch(url, options);
+  }
+  return res;
+}
+async function ensureDriveFolder(){
+  const q = encodeURIComponent(`mimeType='application/vnd.google-apps.folder' and name='${DRIVE_FOLDER_NAME}' and trashed=false`);
+  const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`);
+  const data = await res.json();
+  if(data.files && data.files.length){ driveFolderId = data.files[0].id; return; }
+  const createRes = await driveFetch('https://www.googleapis.com/drive/v3/files', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ name: DRIVE_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder' })
+  });
+  const created = await createRes.json();
+  driveFolderId = created.id;
+}
+async function refreshDriveIndex(){
+  driveFileIndex = {};
+  let pageToken = '';
+  do{
+    const q = encodeURIComponent(`'${driveFolderId}' in parents and trashed=false`);
+    const res = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=nextPageToken,files(id,name)&pageSize=1000${pageToken?'&pageToken='+pageToken:''}`);
+    const data = await res.json();
+    (data.files||[]).forEach(f=>{ driveFileIndex[f.name.replace(/\.json$/,'')] = f.id; });
+    pageToken = data.nextPageToken || '';
+  } while(pageToken);
+}
 async function sget(key, fallback){
   try{
-    const r = await window.storage.get(key, true);
-    return r ? JSON.parse(r.value) : fallback;
-  }catch(e){ return fallback; }
+    const fileId = driveFileIndex[key];
+    if(!fileId) return fallback;
+    const res = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+    if(!res.ok) return fallback;
+    const text = await res.text();
+    return text ? JSON.parse(text) : fallback;
+  }catch(e){ console.error('불러오기 실패', key, e); return fallback; }
 }
 async function sset(key, value){
-  try{ await window.storage.set(key, JSON.stringify(value), true); }
-  catch(e){ console.error('저장 실패', key, e); }
+  try{
+    const body = JSON.stringify(value);
+    const fileId = driveFileIndex[key];
+    if(fileId){
+      await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body
+      });
+    } else {
+      const metadata = { name: key+'.json', parents:[driveFolderId], mimeType:'application/json' };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+      form.append('file', new Blob([body], {type:'application/json'}));
+      const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+        method:'POST',
+        body: form
+      });
+      const created = await res.json();
+      driveFileIndex[key] = created.id;
+    }
+  }catch(e){ console.error('저장 실패', key, e); }
 }
 
 /* ============ 전역 상태 ============ */
@@ -1223,12 +1319,9 @@ document.getElementById('export-data-btn').addEventListener('click', exportAllDa
 
 async function exportAllData(){
   try{
-    const listResult = await window.storage.list('', true);
-    const keys = listResult ? listResult.keys : [];
     const data = {};
-    for(const k of keys){
-      const r = await window.storage.get(k, true);
-      if(r) data[k] = JSON.parse(r.value);
+    for(const key of Object.keys(driveFileIndex)){
+      data[key] = await sget(key, null);
     }
     const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
@@ -1280,10 +1373,37 @@ async function submitChangePassword(){
 }
 
 /* ============ 초기화 ============ */
-(async function init(){
-  await loadAll();
-  await setupAuthGate();
-})();
+function waitForGoogleGIS(timeout){
+  timeout = timeout || 8000;
+  return new Promise((resolve, reject)=>{
+    const start = Date.now();
+    (function poll(){
+      if(window.google && google.accounts && google.accounts.oauth2){ resolve(); return; }
+      if(Date.now()-start > timeout){ reject(new Error('Google 로그인 스크립트를 불러오지 못했습니다.')); return; }
+      setTimeout(poll, 100);
+    })();
+  });
+}
+document.getElementById('google-signin-btn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('google-signin-btn');
+  const errEl = document.getElementById('google-signin-error');
+  btn.disabled = true; btn.textContent = '연결 중...';
+  errEl.textContent = '';
+  try{
+    if(!tokenClient){ await waitForGoogleGIS(); initGoogleAuth(); }
+    await requestDriveAccess(false);
+    await ensureDriveFolder();
+    await refreshDriveIndex();
+    document.getElementById('google-login-screen').style.display = 'none';
+    document.getElementById('lock-screen').style.display = 'flex';
+    await loadAll();
+    await setupAuthGate();
+  }catch(e){
+    console.error(e);
+    errEl.textContent = '로그인에 실패했습니다. 다시 시도해 주세요.';
+    btn.disabled = false; btn.textContent = 'Google 계정으로 로그인';
+  }
+});
 </script>
 </body>
 </html>
