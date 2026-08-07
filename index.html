@@ -545,8 +545,8 @@ function polar(cx,cy,r,angleDeg){
   return { x: cx + r*Math.cos(rad), y: cy + r*Math.sin(rad) };
 }
 function arcPath(cx,cy,r,startDeg,endDeg){
-  const start = polar(cx,cy,r,endDeg);
-  const end = polar(cx,cy,r,startDeg);
+  const start = polar(cx,cy,r,startDeg);
+  const end = polar(cx,cy,r,endDeg);
   const largeArc = (endDeg-startDeg) <= 180 ? "0":"1";
   return `M ${cx} ${cy} L ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z`;
 }
