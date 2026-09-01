@@ -269,6 +269,13 @@ select, .plain-input{
 .hist-item{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #ECEAFA;font-size:13px;}
 .hist-item .note{color:var(--ink-soft);font-size:11.5px;}
 
+.version-item{padding:10px 0;border-bottom:1px solid #ECEAFA;}
+.version-item:last-child{border-bottom:none;}
+.version-item .row.between{align-items:flex-start;gap:10px;}
+.version-item .v-title{font-weight:700;font-size:13.5px;color:var(--ink);}
+.version-item .v-meta{font-size:11px;color:var(--ink-soft);white-space:nowrap;}
+.version-item .v-body{font-size:12px;color:var(--ink-soft);margin-top:4px;line-height:1.5;white-space:pre-line;}
+
 .empty-note{color:var(--ink-soft);font-size:13px;padding:20px 0;text-align:center;}
 .field-label{font-size:12px;color:var(--ink-soft);margin-bottom:4px;display:block;}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;}
@@ -334,6 +341,7 @@ select, .plain-input{
     <div class="row between">
       <div class="brand">우리집 가계부</div>
       <div class="row" style="gap:8px;">
+        <button class="btn secondary small" id="version-history-btn" style="border-color:rgba(255,255,255,.45);color:#fff;">버전 이력</button>
         <button class="btn secondary small" id="export-data-btn" style="border-color:rgba(255,255,255,.45);color:#fff;">데이터 내보내기</button>
         <button class="btn secondary small" id="change-pw-btn" style="border-color:rgba(255,255,255,.45);color:#fff;">비밀번호 변경</button>
       </div>
@@ -1494,6 +1502,52 @@ async function attemptUnlock(){
 
 document.getElementById('change-pw-btn').addEventListener('click', openChangePasswordModal);
 document.getElementById('export-data-btn').addEventListener('click', exportAllData);
+document.getElementById('version-history-btn').addEventListener('click', openVersionHistoryModal);
+
+const VERSION_HISTORY_REPO = 'LSWSY/household-dashboard';
+function versionCommitBodyText(message){
+  return message.split('\n').slice(1)
+    .filter(line => line.trim() && !/^(Co-Authored-By|Claude-Session):/i.test(line.trim()))
+    .join('\n').trim();
+}
+async function openVersionHistoryModal(){
+  document.getElementById('modal-body').innerHTML = `
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>버전 이력</h3>
+    <div class="share-note" style="margin-top:4px;">GitHub 커밋 기록을 기준으로 최신순 표시됩니다.</div>
+    <div id="version-history-list" style="margin-top:14px;"><div class="empty-note">불러오는 중...</div></div>
+  `;
+  openModal();
+  try{
+    const res = await fetch(`https://api.github.com/repos/${VERSION_HISTORY_REPO}/commits?per_page=30&path=index.html`);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const commits = await res.json();
+    const listEl = document.getElementById('version-history-list');
+    if(!listEl) return;
+    if(!commits.length){
+      listEl.innerHTML = `<div class="empty-note">이력이 없습니다.</div>`;
+      return;
+    }
+    listEl.innerHTML = commits.map(c=>{
+      const message = (c.commit && c.commit.message) || '';
+      const title = message.split('\n')[0] || '(제목 없음)';
+      const body = versionCommitBodyText(message);
+      const dateStr = c.commit && c.commit.author && c.commit.author.date ? c.commit.author.date.slice(0,10) : '';
+      const sha = (c.sha||'').slice(0,7);
+      return `<div class="version-item">
+        <div class="row between">
+          <div class="v-title">${escapeHtml(title)}</div>
+          <div class="mono v-meta">${dateStr} · ${sha}</div>
+        </div>
+        ${body?`<div class="v-body">${escapeHtml(body)}</div>`:''}
+      </div>`;
+    }).join('');
+  }catch(e){
+    console.error('버전 이력 불러오기 실패', e);
+    const listEl = document.getElementById('version-history-list');
+    if(listEl) listEl.innerHTML = `<div class="empty-note">버전 이력을 불러오지 못했습니다.</div>`;
+  }
+}
 
 async function exportAllData(){
   try{
