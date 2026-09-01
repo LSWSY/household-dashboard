@@ -882,8 +882,7 @@ function accountNameById(id){
   const a = config.assets.find(x=>x.id===id);
   return a ? a.name : '(삭제된 통장)';
 }
-function personBlock(person, label, data, finalized){
-  const cats = Object.keys({...data.baseline, ...data.actual});
+function personBlock(person, label, data, finalized, cats){
   const accounts = data.accounts || {};
   const baselineTotal = totalOf(data.baseline);
   const actualTotal = totalOf(data.actual);
@@ -910,6 +909,9 @@ function personBlock(person, label, data, finalized){
     <div class="sum-line"><span>기준 합계</span><b class="mono">${fmt(baselineTotal)}원</b></div>
     <div class="sum-line"><span>실제 합계</span><b class="mono">${fmt(actualTotal)}원</b></div>
   </div>`;
+}
+function ledgerCatsOf(personData){
+  return Object.keys({...personData.baseline, ...personData.actual});
 }
 function computeAccountBreakdown(data){
   const result = {};
@@ -963,14 +965,23 @@ function computeAccountDiffTotals(data){
 }
 function renderLedgerDetail(year, month, data){
   const finalized = !!data.finalized;
+  const hCats = ledgerCatsOf(data.husband);
+  const wCats = ledgerCatsOf(data.wife);
+  const wCatSet = new Set(wCats);
+  const commonCats = [], husbandOnly = [];
+  hCats.forEach(c => (wCatSet.has(c) ? commonCats : husbandOnly).push(c));
+  const hCatSet = new Set(hCats);
+  const wifeOnly = wCats.filter(c=>!hCatSet.has(c));
+  const husbandOrder = [...commonCats, ...husbandOnly];
+  const wifeOrder = [...commonCats, ...wifeOnly];
 
   document.getElementById('ledger-detail').innerHTML = `
     <div class="card">
       <h2>${year}년 ${month}월 가계부 ${finalized?'<span class="badge">정리 완료</span>':'<span class="badge pending">진행 중</span>'}</h2>
-      <div class="share-note">25일에 받은 월급을 항목별로 나눠 ‘기준(예산)’에 입력하고, 월말에 ‘실제 지출’을 입력해 비교하세요. 남편·아내 각자 따로 작성합니다.</div>
+      <div class="share-note">25일에 받은 월급을 항목별로 나눠 ‘기준(예산)’에 입력하고, 월말에 ‘실제 지출’을 입력해 비교하세요. 남편·아내 각자 따로 작성합니다. 같은 이름의 항목은 두 표에서 같은 행에 놓입니다.</div>
       <div class="grid2">
-        ${personBlock('husband','남편', data.husband, finalized)}
-        ${personBlock('wife','아내', data.wife, finalized)}
+        ${personBlock('husband','남편', data.husband, finalized, husbandOrder)}
+        ${personBlock('wife','아내', data.wife, finalized, wifeOrder)}
       </div>
       <div class="card" style="margin-top:0;">
         <h2>통장별 내역</h2>
@@ -1429,8 +1440,8 @@ async function viewMonthDetail(year, month){
     <h3>${year}년 ${month}월</h3>
     <div class="share-note">${data.finalized? '정리 완료 · '+data.finalizedAt : '아직 정리되지 않음'}</div>
     <div class="grid2" style="margin-top:10px;">
-      ${personBlock('husband','남편', data.husband, true)}
-      ${personBlock('wife','아내', data.wife, true)}
+      ${personBlock('husband','남편', data.husband, true, ledgerCatsOf(data.husband))}
+      ${personBlock('wife','아내', data.wife, true, ledgerCatsOf(data.wife))}
     </div>
     <div class="card" style="margin-top:0;">
       <h2>통장별 내역</h2>
