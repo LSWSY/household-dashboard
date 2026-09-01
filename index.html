@@ -515,7 +515,11 @@ async function saveLedger(year){
 
 function ensurePersonMonth(ledger, month, person){
   if(!ledger[month]) ledger[month] = {};
-  if(!ledger[month][person]) ledger[month][person] = { baseline:{}, actual:{}, accounts:{}, note:'' };
+  if(!ledger[month][person]){
+    const baseline = {}, accounts = {};
+    CATS_DEFAULT.forEach(c=>{ baseline[c] = 0; accounts[c] = ''; });
+    ledger[month][person] = { baseline, actual:{}, accounts, note:'' };
+  }
   if(!ledger[month][person].accounts) ledger[month][person].accounts = {};
 }
 
@@ -879,7 +883,7 @@ function accountNameById(id){
   return a ? a.name : '(삭제된 통장)';
 }
 function personBlock(person, label, data, finalized){
-  const cats = Object.keys({...Object.fromEntries(CATS_DEFAULT.map(c=>[c,0])), ...data.baseline, ...data.actual});
+  const cats = Object.keys({...data.baseline, ...data.actual});
   const accounts = data.accounts || {};
   const baselineTotal = totalOf(data.baseline);
   const actualTotal = totalOf(data.actual);
