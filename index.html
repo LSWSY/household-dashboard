@@ -1194,10 +1194,10 @@ function renderExpensesList(year, month, list){
 }
 
 async function categoriesForYearMonth(year, month){
-  if(!year || !month) return CATS_DEFAULT.slice();
+  if(!year || !month) return [];
   const ledger = await getLedger(year);
   const data = ledger[month];
-  const set = new Set(CATS_DEFAULT);
+  const set = new Set();
   if(data){
     ['husband','wife'].forEach(p=>{
       const person = data[p];
