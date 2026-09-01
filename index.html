@@ -1193,10 +1193,35 @@ function renderExpensesList(year, month, list){
   `;
 }
 
-function openAddExpenseModal(){
+async function categoriesForYearMonth(year, month){
+  if(!year || !month) return CATS_DEFAULT.slice();
+  const ledger = await getLedger(year);
+  const data = ledger[month];
+  const set = new Set(CATS_DEFAULT);
+  if(data){
+    ['husband','wife'].forEach(p=>{
+      const person = data[p];
+      if(!person) return;
+      Object.keys(person.baseline||{}).forEach(c=>{ if(c) set.add(c); });
+      Object.keys(person.actual||{}).forEach(c=>{ if(c) set.add(c); });
+    });
+  }
+  return [...set];
+}
+async function refreshExpCatSuggest(){
+  const dateEl = document.getElementById('exp-form-date');
+  const dl = document.getElementById('exp-cat-suggest');
+  if(!dateEl || !dl) return;
+  const [y,m] = (dateEl.value||'').split('-').map(Number);
+  const cats = await categoriesForYearMonth(y, m);
+  dl.innerHTML = cats.map(c=>`<option value="${escapeHtml(c)}">`).join('');
+}
+
+async function openAddExpenseModal(){
   const year = Number(document.getElementById('exp-year').value);
   const month = Number(document.getElementById('exp-month').value);
   const defaultDate = `${year}-${String(month).padStart(2,'0')}-01`;
+  const cats = await categoriesForYearMonth(year, month);
   document.getElementById('modal-body').innerHTML = `
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>지출내역 추가</h3>
@@ -1210,12 +1235,12 @@ function openAddExpenseModal(){
       </div>
       <div>
         <span class="field-label">날짜</span>
-        <input type="date" id="exp-form-date" class="plain-input" style="width:100%;" value="${defaultDate}"/>
+        <input type="date" id="exp-form-date" class="plain-input" style="width:100%;" value="${defaultDate}" onchange="refreshExpCatSuggest()"/>
       </div>
       <div>
         <span class="field-label">카테고리</span>
         <input type="text" id="exp-form-category" class="plain-input" style="width:100%;" placeholder="예: 식비" list="exp-cat-suggest"/>
-        <datalist id="exp-cat-suggest">${CATS_DEFAULT.map(c=>`<option value="${c}">`).join('')}</datalist>
+        <datalist id="exp-cat-suggest">${cats.map(c=>`<option value="${escapeHtml(c)}">`).join('')}</datalist>
       </div>
       <div>
         <span class="field-label">금액</span>
@@ -1268,6 +1293,8 @@ async function openEditExpenseModal(year, month, id){
   const list = store[month] || [];
   const e = list.find(x=>x.id===id);
   if(!e) return;
+  const [ey, em] = e.date.split('-').map(Number);
+  const cats = await categoriesForYearMonth(ey, em);
   document.getElementById('modal-body').innerHTML = `
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>지출내역 수정</h3>
@@ -1281,12 +1308,12 @@ async function openEditExpenseModal(year, month, id){
       </div>
       <div>
         <span class="field-label">날짜</span>
-        <input type="date" id="exp-form-date" class="plain-input" style="width:100%;" value="${e.date}"/>
+        <input type="date" id="exp-form-date" class="plain-input" style="width:100%;" value="${e.date}" onchange="refreshExpCatSuggest()"/>
       </div>
       <div>
         <span class="field-label">카테고리</span>
         <input type="text" id="exp-form-category" class="plain-input" style="width:100%;" placeholder="예: 식비" list="exp-cat-suggest" value="${escapeHtml(e.category)}"/>
-        <datalist id="exp-cat-suggest">${CATS_DEFAULT.map(c=>`<option value="${c}">`).join('')}</datalist>
+        <datalist id="exp-cat-suggest">${cats.map(c=>`<option value="${escapeHtml(c)}">`).join('')}</datalist>
       </div>
       <div>
         <span class="field-label">금액</span>
