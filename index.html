@@ -1169,7 +1169,10 @@ function renderExpensesList(year, month, list){
       <td>${escapeHtml(e.category)}</td>
       <td class="num mono">${fmt(e.amount)}원</td>
       <td>${escapeHtml(e.memo||'')}</td>
-      <td class="num"><button class="btn danger small" onclick="deleteExpense(${year},${month},'${e.id}')">삭제</button></td>
+      <td class="num" style="white-space:nowrap;">
+        <button class="btn secondary small" onclick="openEditExpenseModal(${year},${month},'${e.id}')">수정</button>
+        <button class="btn danger small" onclick="deleteExpense(${year},${month},'${e.id}')">삭제</button>
+      </td>
     </tr>
   `).join('') : `<tr><td colspan="6"><div class="empty-note">이번 달 지출내역이 없습니다.</div></td></tr>`;
   const total = list.reduce((a,e)=>a+(Number(e.amount)||0),0);
@@ -1244,6 +1247,88 @@ async function submitAddExpense(){
   closeModal();
 
   // 화면의 연/월 선택을 새 항목의 날짜에 맞춰 갱신
+  const yearSel = document.getElementById('exp-year');
+  const monthSel = document.getElementById('exp-month');
+  if(yearSel && monthSel){
+    if(![...yearSel.options].some(o=>Number(o.value)===y)){
+      yearSel.innerHTML += `<option value="${y}">${y}년</option>`;
+    }
+    yearSel.value = y;
+    monthSel.value = m;
+  }
+  loadExpensesMonth();
+}
+
+async function openEditExpenseModal(year, month, id){
+  const store = await getExpenses(year);
+  const list = store[month] || [];
+  const e = list.find(x=>x.id===id);
+  if(!e) return;
+  document.getElementById('modal-body').innerHTML = `
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>지출내역 수정</h3>
+    <div class="form-grid" style="margin-top:14px;">
+      <div>
+        <span class="field-label">사람</span>
+        <select id="exp-form-person" class="plain-input" style="width:100%;">
+          <option value="husband" ${e.person==='husband'?'selected':''}>남편</option>
+          <option value="wife" ${e.person==='wife'?'selected':''}>아내</option>
+        </select>
+      </div>
+      <div>
+        <span class="field-label">날짜</span>
+        <input type="date" id="exp-form-date" class="plain-input" style="width:100%;" value="${e.date}"/>
+      </div>
+      <div>
+        <span class="field-label">카테고리</span>
+        <input type="text" id="exp-form-category" class="plain-input" style="width:100%;" placeholder="예: 식비" list="exp-cat-suggest" value="${escapeHtml(e.category)}"/>
+        <datalist id="exp-cat-suggest">${CATS_DEFAULT.map(c=>`<option value="${c}">`).join('')}</datalist>
+      </div>
+      <div>
+        <span class="field-label">금액</span>
+        <input type="text" inputmode="numeric" id="exp-form-amount" class="plain-input" style="width:100%;" placeholder="0" value="${fmt(e.amount)}" oninput="const d=this.value.replace(/[^0-9]/g,''); this.value = d ? Number(d).toLocaleString('ko-KR') : '';"/>
+      </div>
+    </div>
+    <div>
+      <span class="field-label">설명</span>
+      <input type="text" id="exp-form-memo" class="plain-input" style="width:100%;margin-bottom:16px;" placeholder="선택 입력" value="${escapeHtml(e.memo||'')}"/>
+    </div>
+    <div class="row" style="justify-content:flex-end;">
+      <button class="btn secondary" onclick="closeModal()">취소</button>
+      <button class="btn" onclick="submitEditExpense(${year},${month},'${id}')">저장</button>
+    </div>
+  `;
+  openModal();
+}
+
+async function submitEditExpense(oldYear, oldMonth, id){
+  const person = document.getElementById('exp-form-person').value;
+  const date = document.getElementById('exp-form-date').value;
+  const category = document.getElementById('exp-form-category').value.trim();
+  const amount = parseNum(document.getElementById('exp-form-amount').value);
+  const memo = document.getElementById('exp-form-memo').value.trim();
+  if(!date){ alert('날짜를 입력해 주세요.'); return; }
+  if(!category){ alert('카테고리를 입력해 주세요.'); return; }
+
+  const [y,m] = date.split('-').map(Number);
+  const oldStore = await getExpenses(oldYear);
+  const oldList = oldStore[oldMonth] || [];
+  const idx = oldList.findIndex(e=>e.id===id);
+  if(idx===-1){ closeModal(); return; }
+
+  if(y===oldYear && m===oldMonth){
+    oldList[idx] = { id, date, person, category, amount, memo };
+    await saveExpenses(oldYear);
+  } else {
+    oldList.splice(idx,1);
+    await saveExpenses(oldYear);
+    const newStore = await getExpenses(y);
+    if(!newStore[m]) newStore[m] = [];
+    newStore[m].push({ id, date, person, category, amount, memo });
+    await saveExpenses(y);
+  }
+  closeModal();
+
   const yearSel = document.getElementById('exp-year');
   const monthSel = document.getElementById('exp-month');
   if(yearSel && monthSel){
