@@ -196,7 +196,7 @@ header.top .btn.secondary:hover{background:rgba(255,255,255,.16);}
 
 .item-block{border-bottom:1px solid #ECEAFA;padding:2px 0;}
 .item-line{
-  display:flex;align-items:center;gap:10px;padding:9px 6px 4px;
+  display:flex;align-items:center;gap:10px;padding:9px 6px 4px;flex-wrap:wrap;
 }
 .item-line .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
 .item-line .name{flex:1;font-size:14px;}
@@ -725,15 +725,16 @@ document.getElementById('modal-overlay').addEventListener('click', e=>{
 });
 
 /* ============ 자산·부채 관리 탭 ============ */
+const REPAY_TYPES = ['만기일시','원리금균등','원금균등'];
 function renderItemsTab(){
   const assetRows = config.assets.map((a,idx)=>`
     <div class="item-block">
       <div class="item-line">
         <span class="dot" style="background:${colorFor(idx,'asset')}"></span>
-        <input type="text" value="${escapeHtml(a.name)}" onchange="renameItem('asset','${a.id}',this.value)" style="width:150px"/>
-        ${numInput(balances.assets[a.id]||0, `quickUpdateValue('asset','${a.id}',this.value)`, 'class="val-input"')}
-        <span style="font-size:12px;color:var(--ink-soft)">원</span>
+        <span class="name">${escapeHtml(a.name)}</span>
+        <span class="mono val-input" style="text-align:right;">${fmt(balances.assets[a.id]||0)}원</span>
         ${a.id===config.parkingId ? '<span class="tag-parking">파킹통장</span>' : `<button class="btn secondary small" onclick="setParking('${a.id}')">파킹통장으로 지정</button>`}
+        <button class="btn secondary small" onclick="openEditItemModal('asset','${a.id}')">수정</button>
         <button class="btn danger small" onclick="deleteItem('asset','${a.id}')">삭제</button>
       </div>
       <div class="item-desc-row">
@@ -746,9 +747,10 @@ function renderItemsTab(){
     <div class="item-block">
       <div class="item-line">
         <span class="dot" style="background:${colorFor(idx,'liability')}"></span>
-        <input type="text" value="${escapeHtml(l.name)}" onchange="renameItem('liability','${l.id}',this.value)" style="width:150px"/>
-        ${numInput(balances.liabilities[l.id]||0, `quickUpdateValue('liability','${l.id}',this.value)`, 'class="val-input"')}
-        <span style="font-size:12px;color:var(--ink-soft)">원</span>
+        <span class="name">${escapeHtml(l.name)}</span>
+        <span class="mono val-input" style="text-align:right;">${fmt(balances.liabilities[l.id]||0)}원</span>
+        <span style="font-size:11.5px;color:var(--ink-soft);white-space:nowrap;">${escapeHtml(l.repayType||'상환방식 미설정')}${l.interestRate!=null&&l.interestRate!==''?` · 연 ${l.interestRate}%`:''}</span>
+        <button class="btn secondary small" onclick="openEditItemModal('liability','${l.id}')">수정</button>
         <button class="btn danger small" onclick="deleteItem('liability','${l.id}')">삭제</button>
       </div>
       <div class="item-desc-row">
@@ -761,7 +763,7 @@ function renderItemsTab(){
   document.getElementById('tab-items').innerHTML = `
     <div class="card">
       <h2>자산 항목 <span class="eyebrow">ASSETS</span></h2>
-      <div class="share-note">이름 변경, 금액 수정은 즉시 저장되며 변동 이력에 자동 기록됩니다.</div>
+      <div class="share-note">이름·금액은 ‘수정’ 버튼을 눌러 사유와 함께 변경하면 변동 이력에 기록됩니다.</div>
       ${assetRows}
       <div class="row" style="margin-top:14px;">
         <input class="plain-input" id="new-asset-name" placeholder="새 자산 이름 (예: 부동산3)" style="flex:1"/>
@@ -771,7 +773,7 @@ function renderItemsTab(){
     </div>
     <div class="card">
       <h2>부채 항목 <span class="eyebrow">LIABILITIES</span></h2>
-      <div class="share-note">이름 변경, 금액 수정은 즉시 저장되며 변동 이력에 자동 기록됩니다.</div>
+      <div class="share-note">이름·금액은 ‘수정’ 버튼을 눌러 사유와 함께 변경하면 변동 이력에 기록됩니다. 상환 방식·금리도 ‘수정’에서 설정할 수 있습니다.</div>
       ${liabRows}
       <div class="row" style="margin-top:14px;">
         <input class="plain-input" id="new-liab-name" placeholder="새 부채 이름 (예: 대출3)" style="flex:1"/>
@@ -790,18 +792,9 @@ async function addItem(type){
   const val = parseNum(valEl.value);
   const id = uid();
   if(type==='asset'){ config.assets.push({id,name}); balances.assets[id]=val; }
-  else { config.liabilities.push({id,name}); balances.liabilities[id]=val; }
+  else { config.liabilities.push({id,name,repayType:null,interestRate:null}); balances.liabilities[id]=val; }
   if(val!==0) recordHistory(type,id,val,val,'항목 신규 등록');
   await saveConfig(); await saveBalances(); await saveHistory();
-  renderItemsTab();
-}
-async function renameItem(type,id,newName){
-  newName = newName.trim();
-  if(!newName) return;
-  const list = type==='asset'?config.assets:config.liabilities;
-  const item = list.find(x=>x.id===id);
-  if(item) item.name = newName;
-  await saveConfig();
   renderItemsTab();
 }
 async function updateItemDesc(type,id,newDesc){
@@ -810,14 +803,77 @@ async function updateItemDesc(type,id,newDesc){
   if(item) item.desc = newDesc.trim();
   await saveConfig();
 }
-async function quickUpdateValue(type,id,newValStr){
-  const newVal = parseNum(newValStr);
+function openEditItemModal(type, id){
+  const list = type==='asset'?config.assets:config.liabilities;
+  const item = list.find(x=>x.id===id);
+  if(!item) return;
+  const curVal = (type==='asset'?balances.assets:balances.liabilities)[id]||0;
+  document.getElementById('modal-body').innerHTML = `
+    <span class="close-x" onclick="closeModal()">✕</span>
+    <h3>${type==='asset'?'자산':'부채'} 항목 수정</h3>
+    <div style="margin-top:14px;">
+      <span class="field-label">이름</span>
+      <input type="text" id="item-edit-name" class="plain-input" style="width:100%;margin-bottom:12px;" value="${escapeHtml(item.name)}"/>
+      <span class="field-label">금액</span>
+      <input type="text" inputmode="numeric" id="item-edit-value" class="plain-input" style="width:100%;margin-bottom:12px;" value="${fmt(curVal)}" oninput="const d=this.value.replace(/[^0-9]/g,''); this.value = d ? Number(d).toLocaleString('ko-KR') : '';"/>
+      ${type==='liability' ? `
+      <span class="field-label">상환 방식</span>
+      <select id="item-edit-repay" class="plain-input" style="width:100%;margin-bottom:12px;">
+        <option value="">미설정</option>
+        ${REPAY_TYPES.map(t=>`<option value="${t}" ${item.repayType===t?'selected':''}>${t}</option>`).join('')}
+      </select>
+      <span class="field-label">금리 (연 %)</span>
+      <input type="text" inputmode="decimal" id="item-edit-rate" class="plain-input" style="width:100%;margin-bottom:12px;" placeholder="예: 3.5" value="${item.interestRate!=null?item.interestRate:''}"/>
+      ` : ''}
+      <span class="field-label">수정 사유</span>
+      <input type="text" id="item-edit-reason" class="plain-input" style="width:100%;margin-bottom:8px;" placeholder="예: 이자 정산 반영, 오기입 수정 등"/>
+      <div class="lock-error" id="item-edit-error" style="text-align:left;"></div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px;">
+      <button class="btn secondary" onclick="closeModal()">취소</button>
+      <button class="btn" onclick="submitEditItem('${type}','${id}')">저장</button>
+    </div>
+  `;
+  openModal();
+}
+async function submitEditItem(type, id){
+  const list = type==='asset'?config.assets:config.liabilities;
+  const item = list.find(x=>x.id===id);
+  if(!item) return;
+  const errEl = document.getElementById('item-edit-error');
+  const newName = document.getElementById('item-edit-name').value.trim();
+  const newVal = parseNum(document.getElementById('item-edit-value').value);
+  const reason = document.getElementById('item-edit-reason').value.trim();
+  if(!newName){ errEl.textContent = '이름을 입력해 주세요.'; return; }
+  if(!reason){ errEl.textContent = '수정 사유를 입력해 주세요.'; return; }
+
+  let repayType, interestRate;
+  if(type==='liability'){
+    repayType = document.getElementById('item-edit-repay').value || null;
+    const rateStr = document.getElementById('item-edit-rate').value.trim();
+    if(rateStr!==''){
+      interestRate = Number(rateStr);
+      if(Number.isNaN(interestRate)){ errEl.textContent = '금리는 숫자로 입력해 주세요.'; return; }
+    } else {
+      interestRate = null;
+    }
+  }
+
+  item.name = newName;
+  if(type==='liability'){ item.repayType = repayType; item.interestRate = interestRate; }
+  await saveConfig();
+
   const map = type==='asset'?balances.assets:balances.liabilities;
   const oldVal = map[id]||0;
-  const delta = newVal-oldVal;
-  map[id]=newVal;
-  if(delta!==0) recordHistory(type,id,newVal,delta,'직접 수정');
-  await saveBalances(); await saveHistory();
+  const delta = newVal - oldVal;
+  if(delta!==0){
+    map[id] = newVal;
+    recordHistory(type, id, newVal, delta, reason);
+    await saveBalances();
+    await saveHistory();
+  }
+
+  closeModal();
   renderItemsTab();
   if(currentTab==='dashboard') renderDashboard();
 }
@@ -881,14 +937,25 @@ async function loadLedgerMonth(){
   renderLedgerDetail(year, month, ledger[month]);
 }
 
+function accountTypeInfo(id){
+  if(!id) return null;
+  const a = config.assets.find(x=>x.id===id);
+  if(a) return { type:'asset', item:a };
+  const l = config.liabilities.find(x=>x.id===id);
+  if(l) return { type:'liability', item:l };
+  return null;
+}
 function accountOptionsHtml(selectedId){
-  const opts = config.assets.map(a=>`<option value="${a.id}" ${a.id===selectedId?'selected':''}>${escapeHtml(a.name)}</option>`).join('');
-  return `<option value="" ${!selectedId?'selected':''}>미지정</option>${opts}`;
+  const assetOpts = config.assets.map(a=>`<option value="${a.id}" ${a.id===selectedId?'selected':''}>${escapeHtml(a.name)}</option>`).join('');
+  const liabOpts = config.liabilities.map(l=>`<option value="${l.id}" ${l.id===selectedId?'selected':''}>${escapeHtml(l.name)}</option>`).join('');
+  return `<option value="" ${!selectedId?'selected':''}>미지정</option>`
+    + (config.assets.length ? `<optgroup label="자산">${assetOpts}</optgroup>` : '')
+    + (config.liabilities.length ? `<optgroup label="부채">${liabOpts}</optgroup>` : '');
 }
 function accountNameById(id){
   if(!id) return '미지정';
-  const a = config.assets.find(x=>x.id===id);
-  return a ? a.name : '(삭제된 통장)';
+  const info = accountTypeInfo(id);
+  return info ? info.item.name : '(삭제된 통장)';
 }
 function personBlock(person, label, data, finalized, cats){
   const accounts = data.accounts || {};
@@ -956,21 +1023,6 @@ function accountBreakdownTableHtml(breakdown){
     <tbody>${rows}</tbody>
   </table>`;
 }
-function computeAccountDiffTotals(data){
-  const totals = {};
-  ['husband','wife'].forEach(person=>{
-    const p = data[person];
-    if(!p) return;
-    const accounts = p.accounts || {};
-    const cats = new Set([...Object.keys(p.baseline||{}), ...Object.keys(p.actual||{})]);
-    cats.forEach(cat=>{
-      const accId = accounts[cat] || '';
-      const diff = (Number(p.baseline[cat])||0) - (Number(p.actual[cat])||0);
-      totals[accId] = (totals[accId]||0) + diff;
-    });
-  });
-  return totals;
-}
 function renderLedgerDetail(year, month, data){
   const finalized = !!data.finalized;
   const hCats = ledgerCatsOf(data.husband);
@@ -993,7 +1045,7 @@ function renderLedgerDetail(year, month, data){
       </div>
       <div class="card" style="margin-top:0;">
         <h2>통장별 내역</h2>
-        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. 정리 완료 시 ‘기준 − 실제’ 금액이 해당 통장 잔액에 반영됩니다.</div>
+        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. 정리 완료 시 자산 통장은 ‘기준 − 실제’ 금액이, 부채 통장(상환 방식이 ‘만기일시’가 아닌 경우)은 ‘실제 지출’ 금액만큼 차감되어 잔액에 반영됩니다.</div>
         ${accountBreakdownTableHtml(computeAccountBreakdown(data))}
       </div>
       <div class="row" style="margin-top:16px;justify-content:flex-end;">
@@ -1063,34 +1115,49 @@ async function finalizeMonth(year, month){
   const ledger = await getLedger(year);
   const data = ledger[month];
   await syncActualFromExpenses(year, month, ledger);
-  const diffTotals = computeAccountDiffTotals(data);
-  const applied = {};
-  Object.keys(diffTotals).forEach(accId=>{
-    if(Math.abs(diffTotals[accId])>0.001) applied[accId] = diffTotals[accId];
+  const breakdown = computeAccountBreakdown(data);
+
+  const changes = {}; // accId -> {type, delta}
+  Object.keys(breakdown).forEach(accId=>{
+    if(accId==='') return;
+    const info = accountTypeInfo(accId);
+    if(!info) return;
+    const { baseline, actual } = breakdown[accId];
+    if(info.type==='asset'){
+      const diff = baseline - actual;
+      if(Math.abs(diff)>0.001) changes[accId] = { type:'asset', delta: diff };
+    } else if(info.type==='liability' && info.item.repayType !== '만기일시'){
+      if(Math.abs(actual)>0.001) changes[accId] = { type:'liability', delta: -actual };
+    }
   });
-  const assignedIds = Object.keys(applied).filter(id=>id!=='');
-  const unassigned = applied[''] || 0;
+  const unassigned = breakdown[''] ? (breakdown[''].baseline - breakdown[''].actual) : 0;
 
   let msg = `${year}년 ${month}월 가계부를 정리 완료하시겠습니까?\n\n`;
-  msg += assignedIds.length
-    ? assignedIds.map(id=>`${accountNameById(id)}: ${applied[id]>=0?'+':''}${fmt(applied[id])}원`).join('\n')
+  const changeIds = Object.keys(changes);
+  msg += changeIds.length
+    ? changeIds.map(id=>{
+        const c = changes[id];
+        const suffix = c.type==='liability' ? ' (대출 상환)' : '';
+        return `${accountNameById(id)}${suffix}: ${c.delta>=0?'+':''}${fmt(c.delta)}원`;
+      }).join('\n')
     : '반영될 통장 변동이 없습니다.';
   if(Math.abs(unassigned)>0.001){
     msg += `\n\n(통장 미지정 금액 ${unassigned>=0?'+':''}${fmt(unassigned)}원은 어떤 통장에도 반영되지 않습니다)`;
   }
   if(!confirm(msg)) return;
 
-  assignedIds.forEach(accId=>{
-    const diff = applied[accId];
-    const oldVal = balances.assets[accId]||0;
-    const newVal = oldVal + diff;
-    balances.assets[accId] = newVal;
-    recordHistory('asset', accId, newVal, diff, `${year}년 ${month}월 가계부 정리`);
+  changeIds.forEach(accId=>{
+    const c = changes[accId];
+    const map = c.type==='asset' ? balances.assets : balances.liabilities;
+    const oldVal = map[accId]||0;
+    const newVal = oldVal + c.delta;
+    map[accId] = newVal;
+    recordHistory(c.type, accId, newVal, c.delta, c.type==='liability' ? `${year}년 ${month}월 가계부 정리 (대출 상환)` : `${year}년 ${month}월 가계부 정리`);
   });
 
   data.finalized = true;
   data.finalizedAt = todayISO();
-  data.accountChanges = applied;
+  data.accountChanges = changes;
 
   if(!yearsIndex.includes(year)){ yearsIndex.push(year); yearsIndex.sort((a,b)=>a-b); await saveYearsIndex(); }
 
@@ -1098,7 +1165,7 @@ async function finalizeMonth(year, month){
   await saveBalances();
   await saveHistory();
   renderLedgerDetail(year, month, data);
-  alert('정리가 완료되었습니다. 자산 파이 그래프와 각 통장의 변동 이력에 반영되었습니다.');
+  alert('정리가 완료되었습니다. 자산/부채 파이 그래프와 각 통장의 변동 이력에 반영되었습니다.');
 }
 async function reopenMonth(year, month){
   if(!confirm('정리를 취소하면 각 통장에 반영된 변동분이 되돌려집니다. 계속할까요?')) return;
@@ -1107,11 +1174,14 @@ async function reopenMonth(year, month){
   const applied = data.accountChanges || {};
   Object.keys(applied).forEach(accId=>{
     if(accId==='') return;
-    const diff = applied[accId];
-    const oldVal = balances.assets[accId]||0;
-    const newVal = oldVal - diff;
-    balances.assets[accId] = newVal;
-    recordHistory('asset', accId, newVal, -diff, `${year}년 ${month}월 가계부 정리 취소`);
+    const raw = applied[accId];
+    // 과거 버전(자산 통장만 지원)은 accId -> 숫자(diff) 형태로 저장되어 있었음
+    const c = (raw && typeof raw === 'object') ? raw : { type:'asset', delta: Number(raw)||0 };
+    const map = c.type==='asset' ? balances.assets : balances.liabilities;
+    const oldVal = map[accId]||0;
+    const newVal = oldVal - c.delta;
+    map[accId] = newVal;
+    recordHistory(c.type, accId, newVal, -c.delta, `${year}년 ${month}월 가계부 정리 취소`);
   });
   data.finalized = false;
   delete data.accountChanges;
