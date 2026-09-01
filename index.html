@@ -207,10 +207,6 @@ header.top .btn.secondary:hover{background:rgba(255,255,255,.16);}
   width:100%;border:1px solid var(--line);border-radius:8px;padding:5px 8px;
   font-size:12.5px;font-family:inherit;color:var(--ink-soft);background:#FAFAFF;
 }
-.tag-parking{
-  font-size:10.5px;background:var(--gold-soft);color:#4338CA;padding:1px 6px;border-radius:6px;font-weight:700;
-}
-
 select, .plain-input{
   border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:13.5px;
   font-family:inherit;background:#fff;color:var(--ink);
@@ -491,7 +487,7 @@ async function sset(key, value){
 }
 
 /* ============ 전역 상태 ============ */
-let config = { assets:[], liabilities:[], parkingId:null };
+let config = { assets:[], liabilities:[] };
 let balances = { assets:{}, liabilities:{} };
 let history = { asset:{}, liability:{} }; // {id: [{date,value,delta,note}]}
 let yearsIndex = [];
@@ -500,7 +496,7 @@ let currentTab = 'dashboard';
 let historyOpenYears = {};
 
 async function loadAll(){
-  config = await sget('config', { assets:[], liabilities:[], parkingId:null });
+  config = await sget('config', { assets:[], liabilities:[] });
   balances = await sget('balances', { assets:{}, liabilities:{} });
   history = await sget('history', { asset:{}, liability:{} });
   yearsIndex = await sget('yearsIndex', []);
@@ -617,7 +613,7 @@ function buildLegend(items, type){
     const pct = total>0 ? (Math.max(it.value,0)/total*100) : 0;
     return `<div class="legend-row" title="${escapeHtml(it.desc||'')}" onclick="handleSliceClick('${type}','${it.id}')">
       <span class="legend-dot" style="background:${colorFor(idx,type)}"></span>
-      <span class="legend-name">${escapeHtml(it.name)}${type==='asset'&&it.id===config.parkingId?' <span class="tag-parking">파킹통장</span>':''}</span>
+      <span class="legend-name">${escapeHtml(it.name)}</span>
       <span class="legend-pct">${pct.toFixed(1)}%</span>
       <span class="legend-val mono">${fmt(it.value)}원</span>
     </div>`;
@@ -733,7 +729,6 @@ function renderItemsTab(){
         <span class="dot" style="background:${colorFor(idx,'asset')}"></span>
         <span class="name">${escapeHtml(a.name)}</span>
         <span class="mono val-input" style="text-align:right;">${fmt(balances.assets[a.id]||0)}원</span>
-        ${a.id===config.parkingId ? '<span class="tag-parking">파킹통장</span>' : `<button class="btn secondary small" onclick="setParking('${a.id}')">파킹통장으로 지정</button>`}
         <button class="btn secondary small" onclick="openEditItemModal('asset','${a.id}')">수정</button>
         <button class="btn danger small" onclick="deleteItem('asset','${a.id}')">삭제</button>
       </div>
@@ -884,17 +879,11 @@ async function deleteItem(type,id){
   if(type==='asset'){
     config.assets = config.assets.filter(x=>x.id!==id);
     delete balances.assets[id];
-    if(config.parkingId===id) config.parkingId=null;
   } else {
     config.liabilities = config.liabilities.filter(x=>x.id!==id);
     delete balances.liabilities[id];
   }
   await saveConfig(); await saveBalances();
-  renderItemsTab();
-}
-async function setParking(id){
-  config.parkingId = id;
-  await saveConfig();
   renderItemsTab();
 }
 
@@ -1004,6 +993,29 @@ function computeAccountBreakdown(data){
   });
   return result;
 }
+async function computeAccountKindBreakdown(year, month, data){
+  const result = {};
+  const ensure = accId => result[accId] || (result[accId] = { baseline:0, consumptionActual:0, savingsActual:0 });
+  ['husband','wife'].forEach(person=>{
+    const p = data[person];
+    if(!p) return;
+    const accounts = p.accounts || {};
+    Object.keys(p.baseline||{}).forEach(cat=>{
+      ensure(accounts[cat] || '').baseline += Number(p.baseline[cat])||0;
+    });
+  });
+  const store = await getExpenses(year);
+  (store[month]||[]).forEach(e=>{
+    const p = data[e.person];
+    if(!p) return;
+    const cat = (e.category||'').trim();
+    if(!cat) return;
+    const bucket = ensure((p.accounts||{})[cat] || '');
+    if(expenseKindOf(e)==='저축') bucket.savingsActual += Number(e.amount)||0;
+    else bucket.consumptionActual += Number(e.amount)||0;
+  });
+  return result;
+}
 function accountBreakdownTableHtml(breakdown){
   const ids = Object.keys(breakdown).filter(id=>Math.abs(breakdown[id].baseline)>0.001 || Math.abs(breakdown[id].actual)>0.001);
   if(ids.length===0) return '<div class="empty-note" style="text-align:left;padding:6px 0;">내역이 없습니다.</div>';
@@ -1045,7 +1057,7 @@ function renderLedgerDetail(year, month, data){
       </div>
       <div class="card" style="margin-top:0;">
         <h2>통장별 내역</h2>
-        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. 정리 완료 시 자산 통장은 ‘기준 − 실제’ 금액이, 부채 통장(상환 방식이 ‘만기일시’가 아닌 경우)은 ‘실제 지출’ 금액만큼 차감되어 잔액에 반영됩니다.</div>
+        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. 정리 완료 시 자산 통장은 ‘소비’건의 ‘기준 − 실제’ 금액과 ‘저축’건의 ‘실제 지출’ 금액을 더해 반영되고, 부채 통장(상환 방식이 ‘만기일시’가 아닌 경우)은 ‘실제 지출’ 금액만큼 차감되어 잔액에 반영됩니다.</div>
         ${accountBreakdownTableHtml(computeAccountBreakdown(data))}
       </div>
       <div class="row" style="margin-top:16px;justify-content:flex-end;">
@@ -1116,19 +1128,23 @@ async function finalizeMonth(year, month){
   const data = ledger[month];
   await syncActualFromExpenses(year, month, ledger);
   const breakdown = computeAccountBreakdown(data);
+  const kindBreakdown = await computeAccountKindBreakdown(year, month, data);
 
   const changes = {}; // accId -> {type, delta}
+  Object.keys(kindBreakdown).forEach(accId=>{
+    if(accId==='') return;
+    const info = accountTypeInfo(accId);
+    if(!info || info.type!=='asset') return;
+    const { baseline, consumptionActual, savingsActual } = kindBreakdown[accId];
+    const delta = (baseline - consumptionActual) + savingsActual;
+    if(Math.abs(delta)>0.001) changes[accId] = { type:'asset', delta };
+  });
   Object.keys(breakdown).forEach(accId=>{
     if(accId==='') return;
     const info = accountTypeInfo(accId);
-    if(!info) return;
-    const { baseline, actual } = breakdown[accId];
-    if(info.type==='asset'){
-      const diff = baseline - actual;
-      if(Math.abs(diff)>0.001) changes[accId] = { type:'asset', delta: diff };
-    } else if(info.type==='liability' && info.item.repayType !== '만기일시'){
-      if(Math.abs(actual)>0.001) changes[accId] = { type:'liability', delta: -actual };
-    }
+    if(!info || info.type!=='liability' || info.item.repayType==='만기일시') return;
+    const { actual } = breakdown[accId];
+    if(Math.abs(actual)>0.001) changes[accId] = { type:'liability', delta: -actual };
   });
   const unassigned = breakdown[''] ? (breakdown[''].baseline - breakdown[''].actual) : 0;
 
@@ -1254,11 +1270,15 @@ async function loadExpensesMonth(){
 
 function personLabel(p){ return p==='husband' ? '남편' : (p==='wife' ? '아내' : p); }
 
+const EXPENSE_KINDS = ['소비','저축'];
+function expenseKindOf(e){ return e.kind==='저축' ? '저축' : '소비'; }
+
 function renderExpensesList(year, month, list){
   const rows = list.length ? list.map(e=>`
     <tr>
       <td class="mono">${e.date}</td>
       <td>${escapeHtml(personLabel(e.person))}</td>
+      <td>${expenseKindOf(e)}</td>
       <td>${escapeHtml(e.category)}</td>
       <td class="num mono">${fmt(e.amount)}원</td>
       <td>${escapeHtml(e.memo||'')}</td>
@@ -1267,14 +1287,14 @@ function renderExpensesList(year, month, list){
         <button class="btn danger small" onclick="deleteExpense(${year},${month},'${e.id}')">삭제</button>
       </td>
     </tr>
-  `).join('') : `<tr><td colspan="6"><div class="empty-note">이번 달 지출내역이 없습니다.</div></td></tr>`;
+  `).join('') : `<tr><td colspan="7"><div class="empty-note">이번 달 지출내역이 없습니다.</div></td></tr>`;
   const total = list.reduce((a,e)=>a+(Number(e.amount)||0),0);
 
   document.getElementById('expenses-detail').innerHTML = `
     <div class="card">
       <h2>${year}년 ${month}월 지출내역</h2>
       <table class="ledger-table">
-        <thead><tr><th>날짜</th><th>사람</th><th>카테고리</th><th class="num">금액</th><th>설명</th><th></th></tr></thead>
+        <thead><tr><th>날짜</th><th>사람</th><th>성격</th><th>카테고리</th><th class="num">금액</th><th>설명</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
       <div class="sum-line" style="margin-top:10px;"><span>합계</span><b class="mono">${fmt(total)}원</b></div>
@@ -1327,6 +1347,12 @@ async function openAddExpenseModal(){
         <input type="date" id="exp-form-date" class="plain-input" style="width:100%;" value="${defaultDate}" onchange="refreshExpCatSuggest()"/>
       </div>
       <div>
+        <span class="field-label">성격</span>
+        <select id="exp-form-kind" class="plain-input" style="width:100%;">
+          ${EXPENSE_KINDS.map(k=>`<option value="${k}">${k}</option>`).join('')}
+        </select>
+      </div>
+      <div>
         <span class="field-label">카테고리</span>
         <input type="text" id="exp-form-category" class="plain-input" style="width:100%;" placeholder="예: 식비" list="exp-cat-suggest"/>
         <datalist id="exp-cat-suggest">${cats.map(c=>`<option value="${escapeHtml(c)}">`).join('')}</datalist>
@@ -1351,6 +1377,7 @@ async function openAddExpenseModal(){
 async function submitAddExpense(){
   const person = document.getElementById('exp-form-person').value;
   const date = document.getElementById('exp-form-date').value;
+  const kind = document.getElementById('exp-form-kind').value;
   const category = document.getElementById('exp-form-category').value.trim();
   const amount = parseNum(document.getElementById('exp-form-amount').value);
   const memo = document.getElementById('exp-form-memo').value.trim();
@@ -1360,7 +1387,7 @@ async function submitAddExpense(){
   const [y,m] = date.split('-').map(Number);
   const store = await getExpenses(y);
   if(!store[m]) store[m] = [];
-  store[m].push({ id: uid(), date, person, category, amount, memo });
+  store[m].push({ id: uid(), date, person, kind, category, amount, memo });
   await saveExpenses(y);
   closeModal();
 
@@ -1400,6 +1427,12 @@ async function openEditExpenseModal(year, month, id){
         <input type="date" id="exp-form-date" class="plain-input" style="width:100%;" value="${e.date}" onchange="refreshExpCatSuggest()"/>
       </div>
       <div>
+        <span class="field-label">성격</span>
+        <select id="exp-form-kind" class="plain-input" style="width:100%;">
+          ${EXPENSE_KINDS.map(k=>`<option value="${k}" ${expenseKindOf(e)===k?'selected':''}>${k}</option>`).join('')}
+        </select>
+      </div>
+      <div>
         <span class="field-label">카테고리</span>
         <input type="text" id="exp-form-category" class="plain-input" style="width:100%;" placeholder="예: 식비" list="exp-cat-suggest" value="${escapeHtml(e.category)}"/>
         <datalist id="exp-cat-suggest">${cats.map(c=>`<option value="${escapeHtml(c)}">`).join('')}</datalist>
@@ -1424,6 +1457,7 @@ async function openEditExpenseModal(year, month, id){
 async function submitEditExpense(oldYear, oldMonth, id){
   const person = document.getElementById('exp-form-person').value;
   const date = document.getElementById('exp-form-date').value;
+  const kind = document.getElementById('exp-form-kind').value;
   const category = document.getElementById('exp-form-category').value.trim();
   const amount = parseNum(document.getElementById('exp-form-amount').value);
   const memo = document.getElementById('exp-form-memo').value.trim();
@@ -1437,14 +1471,14 @@ async function submitEditExpense(oldYear, oldMonth, id){
   if(idx===-1){ closeModal(); return; }
 
   if(y===oldYear && m===oldMonth){
-    oldList[idx] = { id, date, person, category, amount, memo };
+    oldList[idx] = { id, date, person, kind, category, amount, memo };
     await saveExpenses(oldYear);
   } else {
     oldList.splice(idx,1);
     await saveExpenses(oldYear);
     const newStore = await getExpenses(y);
     if(!newStore[m]) newStore[m] = [];
-    newStore[m].push({ id, date, person, category, amount, memo });
+    newStore[m].push({ id, date, person, kind, category, amount, memo });
     await saveExpenses(y);
   }
   closeModal();
