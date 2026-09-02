@@ -1007,29 +1007,6 @@ function computeAccountBreakdown(data){
   });
   return result;
 }
-async function computeAccountKindBreakdown(year, month, data){
-  const result = {};
-  const ensure = accId => result[accId] || (result[accId] = { baseline:0, consumptionActual:0, savingsActual:0 });
-  ['husband','wife'].forEach(person=>{
-    const p = data[person];
-    if(!p) return;
-    const accounts = p.accounts || {};
-    Object.keys(p.baseline||{}).forEach(cat=>{
-      ensure(accounts[cat] || '').baseline += Number(p.baseline[cat])||0;
-    });
-  });
-  const store = await getExpenses(year);
-  (store[month]||[]).forEach(e=>{
-    const p = data[e.person];
-    if(!p) return;
-    const cat = (e.category||'').trim();
-    if(!cat) return;
-    const bucket = ensure((p.accounts||{})[cat] || '');
-    if(expenseKindOf(e)==='저축') bucket.savingsActual += Number(e.amount)||0;
-    else bucket.consumptionActual += Number(e.amount)||0;
-  });
-  return result;
-}
 function accountBreakdownTableHtml(breakdown){
   const ids = Object.keys(breakdown).filter(id=>Math.abs(breakdown[id].baseline)>0.001 || Math.abs(breakdown[id].actual)>0.001);
   if(ids.length===0) return '<div class="empty-note" style="text-align:left;padding:6px 0;">내역이 없습니다.</div>';
@@ -1071,7 +1048,7 @@ function renderLedgerDetail(year, month, data){
       </div>
       <div class="card" style="margin-top:0;">
         <h2>통장별 내역</h2>
-        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. 정리 완료 시 자산 통장은 ‘소비’건의 ‘기준 − 실제’ 금액과 ‘저축’건의 ‘실제 지출’ 금액을 더해 반영되고, 부채 통장(상환 방식이 ‘만기일시’가 아닌 경우)은 ‘실제 지출’ 금액만큼 차감되어 잔액에 반영됩니다.</div>
+        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. ‘실제 지출’은 지출내역의 ‘소비’건은 더하고 ‘저축’건은 빼서 계산되며(저축이 더 많으면 음수가 될 수 있습니다), 정리 완료 시 자산 통장은 ‘기준(예산) − 실제 지출’ 금액이, 부채 통장(상환 방식이 ‘만기일시’가 아닌 경우)은 ‘실제 지출’ 금액만큼 차감되어 잔액에 반영됩니다.</div>
         ${accountBreakdownTableHtml(computeAccountBreakdown(data))}
       </div>
       <div class="row" style="margin-top:16px;justify-content:flex-end;">
@@ -1162,23 +1139,19 @@ async function finalizeMonth(year, month){
   const data = ledger[month];
   await syncActualFromExpenses(year, month, ledger);
   const breakdown = computeAccountBreakdown(data);
-  const kindBreakdown = await computeAccountKindBreakdown(year, month, data);
 
   const changes = {}; // accId -> {type, delta}
-  Object.keys(kindBreakdown).forEach(accId=>{
-    if(accId==='') return;
-    const info = accountTypeInfo(accId);
-    if(!info || info.type!=='asset') return;
-    const { baseline, consumptionActual, savingsActual } = kindBreakdown[accId];
-    const delta = (baseline - consumptionActual) + savingsActual;
-    if(Math.abs(delta)>0.001) changes[accId] = { type:'asset', delta };
-  });
   Object.keys(breakdown).forEach(accId=>{
     if(accId==='') return;
     const info = accountTypeInfo(accId);
-    if(!info || info.type!=='liability' || info.item.repayType==='만기일시') return;
-    const { actual } = breakdown[accId];
-    if(Math.abs(actual)>0.001) changes[accId] = { type:'liability', delta: -actual };
+    if(!info) return;
+    const { baseline, actual } = breakdown[accId];
+    if(info.type==='asset'){
+      const delta = baseline - actual;
+      if(Math.abs(delta)>0.001) changes[accId] = { type:'asset', delta };
+    } else if(info.type==='liability' && info.item.repayType!=='만기일시'){
+      if(Math.abs(actual)>0.001) changes[accId] = { type:'liability', delta: -actual };
+    }
   });
   const unassigned = breakdown[''] ? (breakdown[''].baseline - breakdown[''].actual) : 0;
 
@@ -1265,7 +1238,8 @@ async function syncActualFromExpenses(year, month, ledger){
     list.filter(e=>e.person===person).forEach(e=>{
       const cat = (e.category||'').trim();
       if(!cat) return;
-      sums[cat] = (sums[cat]||0) + (Number(e.amount)||0);
+      const signed = expenseKindOf(e)==='저축' ? -(Number(e.amount)||0) : (Number(e.amount)||0);
+      sums[cat] = (sums[cat]||0) + signed;
     });
     ledger[month][person].actual = sums;
   });
