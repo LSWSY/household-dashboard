@@ -770,9 +770,14 @@ function renderItemsTab(){
       <h2>부채 항목 <span class="eyebrow">LIABILITIES</span></h2>
       <div class="share-note">이름·금액은 ‘수정’ 버튼을 눌러 사유와 함께 변경하면 변동 이력에 기록됩니다. 상환 방식·금리도 ‘수정’에서 설정할 수 있습니다.</div>
       ${liabRows}
-      <div class="row" style="margin-top:14px;">
-        <input class="plain-input" id="new-liab-name" placeholder="새 부채 이름 (예: 대출3)" style="flex:1"/>
+      <div class="row" style="margin-top:14px;flex-wrap:wrap;">
+        <input class="plain-input" id="new-liab-name" placeholder="새 부채 이름 (예: 대출3)" style="flex:1;min-width:140px;"/>
         <input class="plain-input" id="new-liab-value" type="text" inputmode="numeric" placeholder="시작 금액" style="width:160px" oninput="const d=this.value.replace(/[^0-9]/g,''); this.value = d ? Number(d).toLocaleString('ko-KR') : '';"/>
+        <select id="new-liab-repay" class="plain-input" style="width:130px">
+          <option value="">상환방식</option>
+          ${REPAY_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}
+        </select>
+        <input class="plain-input" id="new-liab-rate" type="text" inputmode="decimal" placeholder="금리 (연 %)" style="width:110px"/>
         <button class="btn" onclick="addItem('liability')">추가</button>
       </div>
     </div>
@@ -787,7 +792,16 @@ async function addItem(type){
   const val = parseNum(valEl.value);
   const id = uid();
   if(type==='asset'){ config.assets.push({id,name}); balances.assets[id]=val; }
-  else { config.liabilities.push({id,name,repayType:null,interestRate:null}); balances.liabilities[id]=val; }
+  else {
+    const repayType = document.getElementById('new-liab-repay').value || null;
+    const rateStr = document.getElementById('new-liab-rate').value.trim();
+    let interestRate = null;
+    if(rateStr!==''){
+      interestRate = Number(rateStr);
+      if(Number.isNaN(interestRate)){ alert('금리는 숫자로 입력해 주세요.'); return; }
+    }
+    config.liabilities.push({id,name,repayType,interestRate}); balances.liabilities[id]=val;
+  }
   if(val!==0) recordHistory(type,id,val,val,'항목 신규 등록');
   await saveConfig(); await saveBalances(); await saveHistory();
   renderItemsTab();
