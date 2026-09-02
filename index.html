@@ -1137,6 +1137,26 @@ async function renameCat(person, oldName, newName){
   renderLedgerDetail(year, month, ledger[month]);
 }
 
+function nextYearMonth(year, month){
+  return month===12 ? { year: year+1, month: 1 } : { year, month: month+1 };
+}
+async function carryOverToNextMonth(year, month, data){
+  const { year: ny, month: nm } = nextYearMonth(year, month);
+  const nextLedger = await getLedger(ny);
+  if(nextLedger[nm]) return false; // 다음 달을 이미 열어봤거나 손댄 적이 있으면 덮어쓰지 않음
+  const clonePerson = pd => ({
+    baseline: {...(pd.baseline||{})},
+    actual: {},
+    accounts: {...(pd.accounts||{})},
+    note: ''
+  });
+  nextLedger[nm] = {
+    husband: clonePerson(data.husband),
+    wife: clonePerson(data.wife)
+  };
+  await saveLedger(ny);
+  return true;
+}
 async function finalizeMonth(year, month){
   const ledger = await getLedger(year);
   const data = ledger[month];
@@ -1191,11 +1211,17 @@ async function finalizeMonth(year, month){
 
   if(!yearsIndex.includes(year)){ yearsIndex.push(year); yearsIndex.sort((a,b)=>a-b); await saveYearsIndex(); }
 
+  const carried = await carryOverToNextMonth(year, month, data);
+
   await saveLedger(year);
   await saveBalances();
   await saveHistory();
   renderLedgerDetail(year, month, data);
-  alert('정리가 완료되었습니다. 자산/부채 파이 그래프와 각 통장의 변동 이력에 반영되었습니다.');
+  const { year: ny, month: nm } = nextYearMonth(year, month);
+  alert('정리가 완료되었습니다. 자산/부채 파이 그래프와 각 통장의 변동 이력에 반영되었습니다.'
+    + (carried
+      ? `\n${ny}년 ${nm}월에 이번 달 항목·통장·기준(예산)이 그대로 적용되었습니다.`
+      : `\n${ny}년 ${nm}월은 이미 데이터가 있어 자동 적용을 건너뛰었습니다.`));
 }
 async function reopenMonth(year, month){
   if(!confirm('정리를 취소하면 각 통장에 반영된 변동분이 되돌려집니다. 계속할까요?')) return;
