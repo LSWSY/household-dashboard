@@ -1128,10 +1128,23 @@ async function renameCat(person, oldName, newName){
 function nextYearMonth(year, month){
   return month===12 ? { year: year+1, month: 1 } : { year, month: month+1 };
 }
+function isMonthUntouched(monthData){
+  if(!monthData) return true;
+  if(monthData.finalized) return false;
+  return ['husband','wife'].every(p=>{
+    const pd = monthData[p];
+    if(!pd) return true;
+    const baselineAllZero = Object.values(pd.baseline||{}).every(v=>!v);
+    const accountsAllUnset = Object.values(pd.accounts||{}).every(v=>!v);
+    const actualAllZero = Object.values(pd.actual||{}).every(v=>!v);
+    return baselineAllZero && accountsAllUnset && actualAllZero;
+  });
+}
 async function carryOverToNextMonth(year, month, data){
   const { year: ny, month: nm } = nextYearMonth(year, month);
   const nextLedger = await getLedger(ny);
-  if(nextLedger[nm]) return false; // 다음 달을 이미 열어봤거나 손댄 적이 있으면 덮어쓰지 않음
+  // 다음 달을 그냥 열어만 본 경우(기본값만 있는 상태)는 이월 대상으로 보고 덮어쓴다. 실제로 값을 입력했거나 이미 정리 완료된 경우에만 건너뛴다.
+  if(!isMonthUntouched(nextLedger[nm])) return false;
   const clonePerson = pd => ({
     baseline: {...(pd.baseline||{})},
     actual: {},
