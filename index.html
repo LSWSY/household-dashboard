@@ -679,15 +679,10 @@ function animateNetAmount(net){
 }
 
 /* 조각/범례 클릭 → 이력 모달 */
-function handleSliceClick(type, id){
+function historyRowsHtml(type, id){
   const bucket = type==='liability' ? history.liability : history.asset;
   const list = (bucket[id]||[]).slice().reverse();
-  const cfgList = type==='liability' ? config.liabilities : config.assets;
-  const item = cfgList.find(x=>x.id===id);
-  const name = item ? item.name : '(삭제됨)';
-  const curVal = (type==='liability'?balances.liabilities:balances.assets)[id] || 0;
-
-  const rows = list.length ? list.map(h=>{
+  return list.length ? list.map(h=>{
     const cls = h.delta>0 ? 'pos' : (h.delta<0 ? 'neg':'');
     const sign = h.delta>0?'+':'';
     return `<div class="hist-item">
@@ -695,12 +690,18 @@ function handleSliceClick(type, id){
       <div class="mono ${cls}">${sign}${fmt(h.delta)} <span style="color:var(--ink-soft)">→ ${fmt(h.value)}원</span></div>
     </div>`;
   }).join('') : `<div class="empty-note">아직 기록된 변동 이력이 없습니다.</div>`;
+}
+function handleSliceClick(type, id){
+  const cfgList = type==='liability' ? config.liabilities : config.assets;
+  const item = cfgList.find(x=>x.id===id);
+  const name = item ? item.name : '(삭제됨)';
+  const curVal = (type==='liability'?balances.liabilities:balances.assets)[id] || 0;
 
   document.getElementById('modal-body').innerHTML = `
     <span class="close-x" onclick="closeModal()">✕</span>
     <h3>${escapeHtml(name)}</h3>
     <div class="share-note" style="margin-top:4px;">현재 값: <b class="mono">${fmt(curVal)}원</b></div>
-    <div style="margin-top:14px;">${rows}</div>
+    <div style="margin-top:14px;">${historyRowsHtml(type,id)}</div>
   `;
   openModal();
 }
@@ -841,6 +842,10 @@ function openEditItemModal(type, id){
     <div class="row" style="justify-content:flex-end;margin-top:10px;">
       <button class="btn secondary" onclick="closeModal()">취소</button>
       <button class="btn" onclick="submitEditItem('${type}','${id}')">저장</button>
+    </div>
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid #ECEAFA;">
+      <span class="field-label">변동 이력</span>
+      <div style="margin-top:6px;">${historyRowsHtml(type,id)}</div>
     </div>
   `;
   openModal();
@@ -1048,7 +1053,7 @@ function renderLedgerDetail(year, month, data){
       </div>
       <div class="card" style="margin-top:0;">
         <h2>통장별 내역</h2>
-        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. ‘실제 지출’은 지출내역의 ‘소비’건은 더하고 ‘저축’건은 빼서 계산되며(저축이 더 많으면 음수가 될 수 있습니다), 정리 완료 시 자산 통장은 ‘기준(예산) − 실제 지출’ 금액이, 부채 통장(상환 방식이 ‘만기일시’가 아닌 경우)은 ‘실제 지출’ 금액만큼 차감되어 잔액에 반영됩니다.</div>
+        <div class="share-note">각 항목에 지정한 통장을 기준으로 합산한 금액입니다. ‘실제 지출’은 지출내역의 ‘소비’건은 더하고 ‘저축’건은 빼서 계산되며(저축이 더 많으면 음수가 될 수 있습니다).</div>
         ${accountBreakdownTableHtml(computeAccountBreakdown(data))}
       </div>
       <div class="row" style="margin-top:16px;justify-content:flex-end;">
@@ -1137,67 +1142,21 @@ async function carryOverToNextMonth(year, month, data){
 async function finalizeMonth(year, month){
   const ledger = await getLedger(year);
   const data = ledger[month];
-  await syncActualFromExpenses(year, month, ledger);
-  const breakdown = computeAccountBreakdown(data);
-
-  const changes = {}; // accId -> {type, delta}
-  Object.keys(breakdown).forEach(accId=>{
-    if(accId==='') return;
-    const info = accountTypeInfo(accId);
-    if(!info) return;
-    const { baseline, actual } = breakdown[accId];
-    if(info.type==='asset'){
-      const delta = baseline - actual;
-      if(Math.abs(delta)>0.001) changes[accId] = { type:'asset', delta };
-    } else if(info.type==='liability' && info.item.repayType!=='만기일시'){
-      if(Math.abs(actual)>0.001) changes[accId] = { type:'liability', delta: -actual };
-    }
-  });
-  const unassigned = breakdown[''] ? (breakdown[''].baseline - breakdown[''].actual) : 0;
-
-  let msg = `${year}년 ${month}월 가계부를 정리 완료하시겠습니까?\n\n`;
-  const changeIds = Object.keys(changes);
-  msg += changeIds.length
-    ? changeIds.map(id=>{
-        const c = changes[id];
-        const suffix = c.type==='liability' ? ' (대출 상환)' : '';
-        return `${accountNameById(id)}${suffix}: ${c.delta>=0?'+':''}${fmt(c.delta)}원`;
-      }).join('\n')
-    : '반영될 통장 변동이 없습니다.';
-  if(Math.abs(unassigned)>0.001){
-    msg += `\n\n(통장 미지정 금액 ${unassigned>=0?'+':''}${fmt(unassigned)}원은 어떤 통장에도 반영되지 않습니다)`;
-  }
-  if(!confirm(msg)) return;
-
-  changeIds.forEach(accId=>{
-    const c = changes[accId];
-    const map = c.type==='asset' ? balances.assets : balances.liabilities;
-    const oldVal = map[accId]||0;
-    const newVal = oldVal + c.delta;
-    map[accId] = newVal;
-    recordHistory(c.type, accId, newVal, c.delta, c.type==='liability' ? `${year}년 ${month}월 가계부 정리 (대출 상환)` : `${year}년 ${month}월 가계부 정리`);
-  });
 
   data.finalized = true;
   data.finalizedAt = todayISO();
-  data.accountChanges = changes;
 
   if(!yearsIndex.includes(year)){ yearsIndex.push(year); yearsIndex.sort((a,b)=>a-b); await saveYearsIndex(); }
 
   const carried = await carryOverToNextMonth(year, month, data);
 
   await saveLedger(year);
-  await saveBalances();
-  await saveHistory();
   renderLedgerDetail(year, month, data);
   const { year: ny, month: nm } = nextYearMonth(year, month);
-  alert('정리가 완료되었습니다. 자산/부채 파이 그래프와 각 통장의 변동 이력에 반영되었습니다.'
-    + (carried
-      ? `\n${ny}년 ${nm}월에 이번 달 항목·통장·기준(예산)이 그대로 적용되었습니다.`
-      : `\n${ny}년 ${nm}월은 이미 데이터가 있어 자동 적용을 건너뛰었습니다.`));
+  showToast(`정리가 완료되었습니다.${carried ? ` ${ny}년 ${nm}월에 항목·통장·기준(예산)이 이월되었습니다.` : ''}`);
 }
 async function reopenMonth(year, month){
-  if(!confirm('정리를 취소하면 각 통장에 반영된 변동분이 되돌려집니다. 계속할까요?')) return;
+  if(!confirm('정리를 취소하고 다시 수정할까요? (과거 방식으로 통장에 반영된 내역이 있다면 함께 되돌립니다)')) return;
   const ledger = await getLedger(year);
   const data = ledger[month];
   const applied = data.accountChanges || {};
